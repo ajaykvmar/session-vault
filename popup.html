@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=380">
+  <title>Session Vault</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #1c1c1e;
+      --surface: #2c2c2e;
+      --surface2: #3a3a3c;
+      --border: #38383a;
+      --text: #f5f5f7;
+      --text2: #98989d;
+      --accent: #5e9eff;
+      --accent-hover: #7ab0ff;
+      --danger: #ff453a;
+      --danger-hover: #ff6b5e;
+      --radius: 10px;
+      --sm: 12px;
+      --md: 13px;
+      --lg: 15px;
+    }
+    body {
+      width: 380px;
+      min-height: 200px;
+      max-height: 600px;
+      overflow-y: auto;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+      font-size: var(--md);
+      background: var(--bg);
+      color: var(--text);
+      scrollbar-width: thin;
+      scrollbar-color: var(--surface2) transparent;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 4px; }
+
+    /* ── Header ── */
+    .header {
+      padding: 16px 16px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .header h1 span { background: var(--accent); font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; font-weight: 500; }
+    .stats-badge {
+      font-size: var(--sm);
+      color: var(--text2);
+      background: var(--surface);
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+
+    /* ── Buttons ── */
+    .actions {
+      padding: 10px 16px;
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .actions button {
+      flex: 1;
+      padding: 7px 12px;
+      border: none;
+      border-radius: 7px;
+      font-size: var(--sm);
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .actions button:disabled { opacity: .4; cursor: default; }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-danger {
+      background: var(--surface2);
+      color: var(--danger);
+    }
+    .btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
+
+    /* ── Tab Saver ── */
+    .tab-saver {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-saver-or {
+      font-size: 11px;
+      color: var(--text2);
+      flex-shrink: 0;
+    }
+    .tab-saver-select {
+      flex: 1;
+      min-width: 80px;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: var(--sm);
+      outline: none;
+      cursor: pointer;
+    }
+    .tab-saver-select:focus { border-color: var(--accent); }
+    .tab-saver-select option { background: var(--bg); color: var(--text); }
+    .btn-save-tab {
+      padding: 5px 12px;
+      border: none;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-size: var(--sm);
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-save-tab:hover { background: var(--accent-hover); }
+    .btn-save-tab:disabled { opacity: .4; cursor: default; }
+    .btn-save-tab-secondary {
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: var(--sm);
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-save-tab-secondary:hover { background: var(--surface2); }
+    .btn-save-tab-secondary:disabled { opacity: .4; cursor: default; }
+
+    /* ── Section ── */
+    .section {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .section:last-child { border-bottom: none; }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .section-header h2 {
+      font-size: var(--md);
+      font-weight: 600;
+      color: var(--text2);
+    }
+    .section-header .count {
+      font-size: var(--sm);
+      color: var(--text2);
+      background: var(--surface);
+      padding: 0 6px;
+      border-radius: 4px;
+    }
+    .section-header .arrow {
+      transition: transform .2s;
+      font-size: 10px;
+      color: var(--text2);
+    }
+    .section-header .arrow.open { transform: rotate(90deg); }
+    .section-body { padding: 0 16px 4px; }
+    .section-body.hidden { display: none; }
+
+    /* ── Group List ── */
+    .group-item, .session-item {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin: 6px 0;
+    }
+    .group-row, .session-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .group-info, .session-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .group-name, .session-name {
+      font-size: var(--md);
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .group-meta, .session-meta {
+      font-size: 11px;
+      color: var(--text2);
+      margin-top: 2px;
+    }
+    .group-color-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 6px;
+      flex-shrink: 0;
+    }
+    .group-actions, .session-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 6px;
+      background: var(--surface2);
+      color: var(--text2);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .icon-btn:hover { background: var(--accent); color: #fff; }
+    .icon-btn.danger:hover { background: var(--danger); color: #fff; }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      color: var(--text2);
+      font-size: var(--sm);
+      padding: 12px 0;
+    }
+
+    /* ── New Group Form ── */
+    .new-group-form {
+      padding: 8px 16px 4px;
+      display: none;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .new-group-form.open { display: flex; }
+    .new-group-form input {
+      flex: 1;
+      min-width: 140px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: var(--sm);
+      outline: none;
+    }
+    .new-group-form input:focus { border-color: var(--accent); }
+    .color-picker {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .color-picker button {
+      width: 20px; height: 20px;
+      border: 2px solid transparent;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    .color-picker button.selected { border-color: #fff; }
+    .new-group-form .btn-sm {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-size: var(--sm);
+      cursor: pointer;
+    }
+    .new-group-form .btn-sm:hover { background: var(--accent-hover); }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 12px;
+      left: 16px;
+      right: 16px;
+      background: var(--surface2);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: var(--sm);
+      text-align: center;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity .25s, transform .25s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>🔐 Session Vault</h1>
+    <span class="stats-badge" id="statsBadge">—</span>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn-primary" id="saveBtn">💾 Save</button>
+    <button class="btn-danger" id="saveCloseBtn">💾✕ Save & Close</button>
+  </div>
+
+  <!-- Save Tab Strip -->
+  <div class="tab-saver" id="tabSaver">
+    <button class="btn-save-tab" id="saveTabBtn">📄 Save Tab</button>
+    <span class="tab-saver-or">or to group</span>
+    <select class="tab-saver-select" id="groupSelect">
+      <option value="">Select…</option>
+    </select>
+    <button class="btn-save-tab-secondary" id="saveToGroupBtn">Save</button>
+  </div>
+
+  <!-- Saved Tabs Section -->
+  <div class="section" id="savedTabsSection">
+    <div class="section-header" id="savedTabsToggle">
+      <h2>📄 Saved Tabs</h2>
+      <span class="count" id="savedTabsCount">0</span>
+      <span class="arrow open" id="savedTabsArrow">▶</span>
+    </div>
+    <div class="section-body" id="savedTabsBody">
+      <div id="savedTabsList"></div>
+      <div class="empty" id="savedTabsEmpty">No saved tabs</div>
+    </div>
+  </div>
+
+  <!-- Groups Section -->
+  <div class="section" id="groupsSection">
+    <div class="section-header" id="groupsToggle">
+      <h2>📂 Saved Groups</h2>
+      <span class="count" id="groupsCount">0</span>
+      <span class="arrow open" id="groupsArrow">▶</span>
+    </div>
+    <div class="section-body" id="groupsBody">
+      <div id="groupsList"></div>
+      <div class="empty" id="groupsEmpty">No saved groups yet</div>
+      <button class="icon-btn" id="newGroupBtn" style="width:100%;border-radius:7px;margin-top:4px;gap:4px;font-size:var(--sm);background:var(--surface);">+ New Group</button>
+      <div class="new-group-form" id="newGroupForm">
+        <input type="text" id="groupNameInput" placeholder="Group name" maxlength="40">
+        <div class="color-picker" id="colorPicker"></div>
+        <button class="btn-sm" id="createGroupBtn">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sessions Section -->
+  <div class="section" id="sessionsSection">
+    <div class="section-header" id="sessionsToggle">
+      <h2>📁 Saved Sessions</h2>
+      <span class="count" id="sessionsCount">0</span>
+      <span class="arrow" id="sessionsArrow">▶</span>
+    </div>
+    <div class="section-body hidden" id="sessionsBody">
+      <div id="sessionsList"></div>
+      <div class="empty" id="sessionsEmpty">No saved sessions</div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
