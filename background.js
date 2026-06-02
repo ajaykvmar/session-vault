@@ -188,18 +188,24 @@ async function openGroup(groupId) {
   if (!g) throw new Error('Group not found');
   if (!g.tabs.length) throw new Error('Group is empty');
 
-  const win = await chrome.windows.create({ state: 'normal' });
+  // Get the current window to open tabs in
+  const currentWin = await chrome.windows.getCurrent();
+  const winId = currentWin ? currentWin.id : undefined;
+
   const createdIds = [];
   for (const t of g.tabs) {
     try {
       const tab = await chrome.tabs.create({
-        windowId: win.id, url: t.url, active: false
+        windowId: winId, url: t.url, active: false
       });
       createdIds.push(tab.id);
     } catch (e) {
       console.warn('Failed to open tab:', t.url, e);
     }
   }
+
+  if (!createdIds.length) throw new Error('Failed to open any tabs');
+
   // Group them
   if (createdIds.length > 1) {
     try {
@@ -211,10 +217,12 @@ async function openGroup(groupId) {
       console.warn('Failed to group tabs:', e);
     }
   }
-  // Remove default new tab
-  const tabs = await chrome.tabs.query({ windowId: win.id });
+
+  // Remove any blank new-tab that was created
+  const tabs = await chrome.tabs.query({ windowId: winId });
   const def = tabs.find(t =>
-    t.url === 'chrome://newtab/' || t.url === 'about:blank'
+    (t.url === 'chrome://newtab/' || t.url === 'about:blank') &&
+    !createdIds.includes(t.id)
   );
   if (def) try { await chrome.tabs.remove(def.id); } catch (_) {}
 }
@@ -284,6 +292,173 @@ async function clearAllSavedTabs() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  SELECTIVE SAVE — save only chosen Chrome tab groups
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function listCurrentGroups() {
+  // Return current Chrome tab groups with their tabs, plus ungrouped tabs
+  const wins = await chrome.windows.getAll({ populate: true });
+  const normal = wins.filter(w => w.type === 'normal');
+  const allGroups = await chrome.tabGroups.query({});
+  const groupsMap = {}; // groupId -> group info with tabs
+
+  allGroups.forEach(g => {
+    groupsMap[g.id] = {
+      id: String(g.id),
+      title: g.title || '(unnamed)',
+      color: g.color || 'grey',
+      collapsed: g.collapsed,
+      windowId: g.windowId,
+      tabs: []
+    };
+  });
+
+  // Assign tabs to their groups
+  normal.forEach(win => {
+    win.tabs.forEach(t => {
+      if (t.groupId > 0 && groupsMap[t.groupId]) {
+        groupsMap[t.groupId].tabs.push({
+          url: t.url, title: t.title, pinned: t.pinned, active: t.active, index: t.index
+        });
+      }
+    });
+  });
+
+  const groups = Object.values(groupsMap).filter(g => g.tabs.length > 0);
+  // Collect ungrouped tabs
+  const ungrouped = [];
+  normal.forEach(win => {
+    win.tabs.forEach(t => {
+      if (!t.groupId) {
+        ungrouped.push({
+          url: t.url, title: t.title, pinned: t.pinned, active: t.active, index: t.index,
+          windowId: win.id
+        });
+      }
+    });
+  });
+
+  return { groups, ungrouped, windowCount: normal.length };
+}
+
+async function saveSelectedAsGroups(groupsToInclude, includeUngrouped) {
+  const wins = await chrome.windows.getAll({ populate: true });
+  const normal = wins.filter(w => w.type === 'normal');
+  const allGroups = await chrome.tabGroups.query({});
+  const includeSet = new Set(groupsToInclude.map(String));
+
+  // Collect selected Chrome tab groups with their tabs
+  const groupMap = {}; // chromeGroupId -> {name, color, tabs[]}
+  const ungroupedTabs = [];
+
+  normal.forEach(win => {
+    win.tabs.forEach(t => {
+      if (t.groupId > 0 && includeSet.has(String(t.groupId))) {
+        const chromeGroup = allGroups.find(g => g.id === t.groupId);
+        if (!chromeGroup) return;
+        if (!groupMap[t.groupId]) {
+          groupMap[t.groupId] = {
+            name: chromeGroup.title || '(unnamed)',
+            color: chromeGroup.color || 'blue',
+            tabs: []
+          };
+        }
+        groupMap[t.groupId].tabs.push({
+          url: t.url,
+          title: t.title || t.url,
+          addedAt: Date.now()
+        });
+      } else if (!t.groupId && includeUngrouped &&
+                 t.url && !t.url.startsWith('chrome://') &&
+                 !t.url.startsWith('chrome-extension://') &&
+                 !t.url.startsWith('about:')) {
+        ungroupedTabs.push({
+          url: t.url,
+          title: t.title || t.url,
+          addedAt: Date.now()
+        });
+      }
+    });
+  });
+
+  // Load existing saved groups
+  const data = await chrome.storage.local.get(GROUPS_KEY);
+  const groups = data[GROUPS_KEY] || [];
+  let groupCount = 0;
+  let tabCount = 0;
+
+  // Add each Chrome group as a Saved Group entry
+  for (const [, sg] of Object.entries(groupMap)) {
+    const existing = groups.find(g => g.name === sg.name);
+    if (existing) {
+      // Merge — add new tabs not already present
+      sg.tabs.forEach(t => {
+        if (!existing.tabs.some(et => et.url === t.url)) {
+          existing.tabs.push(t);
+          tabCount++;
+        }
+      });
+    } else {
+      groups.unshift({
+        id: crypto.randomUUID(),
+        name: sg.name,
+        color: sg.color,
+        createdAt: Date.now(),
+        tabs: sg.tabs
+      });
+      tabCount += sg.tabs.length;
+      groupCount++;
+    }
+  }
+  await chrome.storage.local.set({ [GROUPS_KEY]: groups });
+
+  // Save ungrouped tabs as individual saved tabs
+  let ungroupedCount = 0;
+  if (ungroupedTabs.length) {
+    const tabsData = await chrome.storage.local.get(SAVED_TABS_KEY);
+    const savedTabs = tabsData[SAVED_TABS_KEY] || [];
+    ungroupedTabs.forEach(t => {
+      if (!savedTabs.some(st => st.url === t.url)) {
+        savedTabs.unshift({ id: crypto.randomUUID(), ...t, savedAt: Date.now() });
+        ungroupedCount++;
+      }
+    });
+    await chrome.storage.local.set({ [SAVED_TABS_KEY]: savedTabs });
+  }
+
+  return { groupCount, tabCount, ungroupedCount };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  TAB DISCARD — unload tabs from RAM without closing windows
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function discardTabsExcept(groupsToKeep, discardUngrouped) {
+  const wins = await chrome.windows.getAll({ populate: true });
+  const normal = wins.filter(w => w.type === 'normal');
+  const keepSet = new Set(groupsToKeep.map(String));
+  let count = 0;
+
+  for (const win of normal) {
+    for (const t of win.tabs) {
+      let shouldDiscard = false;
+      if (t.groupId > 0 && !keepSet.has(String(t.groupId))) {
+        shouldDiscard = true;
+      } else if (!t.groupId && discardUngrouped) {
+        shouldDiscard = true;
+      }
+      if (shouldDiscard && t.id) {
+        try {
+          await chrome.tabs.discard(t.id);
+          count++;
+        } catch (_) { /* tab may already be discarded */ }
+      }
+    }
+  }
+  return count;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  CURRENT STATS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -331,6 +506,31 @@ chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
     case 'listSessions':
       chrome.storage.local.get(SESSIONS_KEY)
         .then(d => sendResponse({ ok: true, sessions: d[SESSIONS_KEY] || [] }))
+        .catch(e => sendResponse({ ok: false, error: e.message }));
+      return true;
+
+    // Selective Save — current Chrome groups
+    case 'listCurrentGroups':
+      listCurrentGroups()
+        .then(r => sendResponse({ ok: true, groups: r.groups, ungrouped: r.ungrouped, windowCount: r.windowCount }))
+        .catch(e => sendResponse({ ok: false, error: e.message }));
+      return true;
+    case 'saveSelected':
+      saveSelectedAsGroups(req.groupsToInclude, req.includeUngrouped)
+        .then(r => sendResponse({ ok: true, groups: r.groupCount, groupTabs: r.tabCount, ungrouped: r.ungroupedCount }))
+        .catch(e => sendResponse({ ok: false, error: e.message }));
+      return true;
+    case 'saveSelectedAndClose':
+      saveSelectedAsGroups(req.groupsToInclude, req.includeUngrouped)
+        .then(async r => { await closeAllWindows(); return r; })
+        .then(r => sendResponse({ ok: true, groups: r.groupCount, groupTabs: r.tabCount, ungrouped: r.ungroupedCount }))
+        .catch(e => sendResponse({ ok: false, error: e.message }));
+      return true;
+
+    // Tab discarding
+    case 'discardUnselected':
+      discardTabsExcept(req.groupsToKeep, req.discardUngrouped)
+        .then(count => sendResponse({ ok: true, count }))
         .catch(e => sendResponse({ ok: false, error: e.message }));
       return true;
 

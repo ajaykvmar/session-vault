@@ -471,24 +471,176 @@ async function renderStats() {
 }
 
 // ─── Save Actions ───────────────────────────────────────────────────────
-async function handleSave(andClose) {
-  const btn = andClose
-    ? document.getElementById('saveCloseBtn')
-    : document.getElementById('saveBtn');
-  btn.disabled = true;
-  const orig = btn.textContent;
-  btn.textContent = '⏳ Saving…';
+// Selective save via group selection overlay
+
+let overlayAndClose = false;
+
+async function openGroupSelectOverlay(andClose) {
+  overlayAndClose = andClose;
+  const overlay = document.getElementById('groupSelectOverlay');
+  const list = document.getElementById('overlayGroupList');
+  const empty = document.getElementById('overlayEmpty');
+  const ungroupedRow = document.getElementById('overlayUngroupedRow');
+  const saveBtn = document.getElementById('overlaySaveBtn');
+  const saveCloseBtn = document.getElementById('overlaySaveCloseBtn');
+
+  // Show the right button for the mode
+  if (andClose) {
+    saveCloseBtn.style.display = '';
+    saveBtn.style.display = 'none';
+    saveCloseBtn.textContent = '💾✕ Save Selected & Close';
+  } else {
+    saveBtn.style.display = '';
+    saveCloseBtn.style.display = 'none';
+    saveBtn.textContent = '💾 Save Selected';
+  }
+
   try {
-    const action = andClose ? 'saveAndClose' : 'save';
-    const { session } = await bg({ action });
-    toast(`Saved: ${session.tabCount} tabs across ${session.windowCount} windows`);
-    renderSessions();
+    const { groups, ungrouped } = await bg({ action: 'listCurrentGroups' });
+
+    list.innerHTML = '';
+
+    if (!groups.length && !ungrouped.length) {
+      empty.style.display = '';
+      ungroupedRow.style.display = 'none';
+      saveBtn.disabled = true;
+      saveCloseBtn.disabled = true;
+    } else {
+      empty.style.display = 'none';
+
+      // Show ungrouped row if there are ungrouped tabs
+      if (ungrouped.length > 0) {
+        ungroupedRow.style.display = 'flex';
+        document.querySelector('#overlayUngroupedRow span').textContent =
+          `Include ungrouped tabs (${ungrouped.length} tab${ungrouped.length !== 1 ? 's' : ''})`;
+      } else {
+        ungroupedRow.style.display = 'none';
+      }
+
+      // Render groups with checkboxes
+      groups.forEach(g => {
+        const item = document.createElement('div');
+        item.className = 'sel-group-item';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.dataset.groupId = g.id;
+
+        const dot = document.createElement('span');
+        dot.className = 'sel-group-dot';
+        dot.style.background = colorToHex(g.color || 'grey');
+
+        const label = document.createElement('span');
+        label.className = 'sel-group-label';
+        label.textContent = g.title;
+
+        const count = document.createElement('span');
+        count.className = 'sel-group-count';
+        count.textContent = `${g.tabs.length} tab${g.tabs.length !== 1 ? 's' : ''}`;
+
+        item.appendChild(cb);
+        item.appendChild(dot);
+        item.appendChild(label);
+        item.appendChild(count);
+        list.appendChild(item);
+      });
+
+      saveBtn.disabled = false;
+      saveCloseBtn.disabled = false;
+    }
+  } catch (e) {
+    list.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
+    saveBtn.disabled = true;
+    saveCloseBtn.disabled = true;
+  }
+
+  overlay.classList.add('open');
+}
+
+function getSelectedGroupIds() {
+  const ids = [];
+  document.querySelectorAll('#overlayGroupList input[type="checkbox"]').forEach(cb => {
+    if (cb.checked) ids.push(cb.dataset.groupId);
+  });
+  return ids;
+}
+
+async function handleSelectiveSave(andClose) {
+  const groupIds = getSelectedGroupIds();
+  const includeUngrouped = document.getElementById('overlayIncludeUngrouped').checked;
+  const action = andClose ? 'saveSelectedAndClose' : 'saveSelected';
+  const overlay = document.getElementById('groupSelectOverlay');
+  // The active button depends on mode — use it for loading state
+  const activeBtn = andClose
+    ? document.getElementById('overlaySaveCloseBtn')
+    : document.getElementById('overlaySaveBtn');
+
+  if (!groupIds.length && !includeUngrouped) {
+    toast('Select at least one group or enable ungrouped tabs', 2000);
+    return;
+  }
+
+  activeBtn.disabled = true;
+  const origText = activeBtn.textContent;
+  activeBtn.textContent = '⏳ Saving…';
+
+  try {
+    const r = await bg({ action, groupsToInclude: groupIds, includeUngrouped });
+    overlay.classList.remove('open');
+
+    const parts = [];
+    if (r.groups > 0) parts.push(`${r.groupTabs} tab${r.groupTabs !== 1 ? 's' : ''} in ${r.groups} group${r.groups !== 1 ? 's' : ''}`);
+    if (r.ungrouped > 0) parts.push(`${r.ungrouped} ungrouped tab${r.ungrouped !== 1 ? 's' : ''}`);
+    toast(`Saved: ${parts.join(', ')}`, 2500);
+
+    renderGroups();
+    renderSavedTabs();
+    renderStats();
+
+    // Optionally discard unselected tabs after saving
+    if (document.getElementById('overlayDiscardUnselected').checked) {
+      const { count } = await bg({ action: 'discardUnselected', groupsToKeep: groupIds, discardUngrouped: !includeUngrouped });
+      if (count > 0) toast(`Saved + discarded ${count} tab${count !== 1 ? 's' : ''}`, 2500);
+    }
+  } catch (e) {
+    toast(`Error: ${e.message}`, 3000);
+    activeBtn.textContent = origText;
+    activeBtn.disabled = false;
+  }
+}
+
+// ─── Old handleSave kept for backward compat (not used by buttons anymore) ──
+
+// ─── Standalone Discard ─────────────────────────────────────────────────
+async function handleDiscardOnly() {
+  const groupIds = getSelectedGroupIds();
+  const discardUngrouped = document.getElementById('overlayIncludeUngrouped').checked;
+  const overlay = document.getElementById('groupSelectOverlay');
+
+  if (!groupIds.length && !discardUngrouped) {
+    toast('Select at least one group to keep, or enable ungrouped tabs', 2000);
+    return;
+  }
+
+  const btn = document.getElementById('overlayDiscardBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Discarding…';
+
+  try {
+    const { count } = await bg({ action: 'discardUnselected', groupsToKeep: groupIds, discardUngrouped });
+    overlay.classList.remove('open');
+    if (count > 0) {
+      toast(`Discarded ${count} tab${count !== 1 ? 's' : ''} — RAM freed`, 2500);
+    } else {
+      toast('No tabs to discard (all already discarded or kept)', 2000);
+    }
     renderStats();
   } catch (e) {
     toast(`Error: ${e.message}`, 3000);
+    btn.disabled = false;
+    btn.textContent = '🗑 Discard Others (save nothing, just free RAM)';
   }
-  btn.textContent = orig;
-  btn.disabled = false;
 }
 
 // ─── New Group Form ─────────────────────────────────────────────────────
@@ -546,8 +698,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupNewGroupForm();
   setupTabSaver();
 
-  document.getElementById('saveBtn').addEventListener('click', () => handleSave(false));
-  document.getElementById('saveCloseBtn').addEventListener('click', () => handleSave(true));
+  // Save buttons open the group selection overlay
+  document.getElementById('saveBtn').addEventListener('click', () => openGroupSelectOverlay(false));
+  document.getElementById('saveCloseBtn').addEventListener('click', () => openGroupSelectOverlay(true));
+
+  // Overlay buttons
+  document.getElementById('overlaySaveBtn').addEventListener('click', () => handleSelectiveSave(false));
+  document.getElementById('overlaySaveCloseBtn').addEventListener('click', () => handleSelectiveSave(true));
+  document.getElementById('overlayCancelBtn').addEventListener('click', () => {
+    document.getElementById('groupSelectOverlay').classList.remove('open');
+  });
+  document.getElementById('overlayCloseBtn').addEventListener('click', () => {
+    document.getElementById('groupSelectOverlay').classList.remove('open');
+  });
+  // Close overlay on backdrop click
+  document.getElementById('groupSelectOverlay').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      document.getElementById('groupSelectOverlay').classList.remove('open');
+    }
+  });
+
+  // Standalone discard button
+  document.getElementById('overlayDiscardBtn').addEventListener('click', handleDiscardOnly);
 
   await Promise.all([
     renderStats(),

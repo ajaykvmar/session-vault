@@ -310,6 +310,126 @@
       pointer-events: none;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ── Group Selection Overlay ── */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      display: none;
+      align-items: flex-end;
+      z-index: 100;
+    }
+    .overlay.open { display: flex; }
+    .overlay-panel {
+      background: var(--bg);
+      border-radius: 14px 14px 0 0;
+      width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 16px;
+      animation: slideUp .2s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+    .overlay-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .overlay-header h2 {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .overlay-header .close-btn {
+      width: 28px; height: 28px;
+      border: none; border-radius: 6px;
+      background: var(--surface2);
+      color: var(--text2);
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .overlay-header .close-btn:hover { background: var(--danger); color: #fff; }
+    .sel-group-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      margin: 4px 0;
+      background: var(--surface);
+      border-radius: 8px;
+    }
+    .sel-group-item input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .sel-group-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sel-group-label {
+      flex: 1;
+      font-size: var(--md);
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sel-group-count {
+      font-size: 11px;
+      color: var(--text2);
+      flex-shrink: 0;
+    }
+    .sel-ungrouped {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      margin: 6px 0 10px;
+      background: var(--surface);
+      border-radius: 8px;
+    }
+    .sel-ungrouped input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .sel-ungrouped span {
+      flex: 1;
+      font-size: var(--md);
+      font-weight: 500;
+    }
+    .sel-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .sel-actions button {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: var(--sm);
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .sel-actions button:disabled { opacity: .4; cursor: default; }
+    .sel-cancel {
+      background: var(--surface2);
+      color: var(--text2);
+    }
+    .sel-cancel:hover:not(:disabled) { background: var(--border); }
   </style>
 </head>
 <body>
@@ -378,6 +498,34 @@
     <div class="section-body hidden" id="sessionsBody">
       <div id="sessionsList"></div>
       <div class="empty" id="sessionsEmpty">No saved sessions</div>
+    </div>
+  </div>
+
+  <!-- Group Selection Overlay -->
+  <div class="overlay" id="groupSelectOverlay">
+    <div class="overlay-panel">
+      <div class="overlay-header">
+        <h2>Select Groups to Save</h2>
+        <button class="close-btn" id="overlayCloseBtn">×</button>
+      </div>
+      <div id="overlayGroupList"></div>
+      <div id="overlayEmpty" class="empty" style="display:none;padding:16px 0;">No tab groups found in current windows</div>
+      <div class="sel-ungrouped" id="overlayUngroupedRow" style="display:none;">
+        <input type="checkbox" id="overlayIncludeUngrouped" checked>
+        <span>Include ungrouped tabs</span>
+      </div>
+      <div class="sel-ungrouped" id="overlayDiscardRow">
+        <input type="checkbox" id="overlayDiscardUnselected" checked>
+        <span>Discard unselected tabs (free RAM, keep in tab strip)</span>
+      </div>
+      <div class="sel-actions">
+        <button class="sel-cancel" id="overlayCancelBtn">Cancel</button>
+        <button class="btn-primary" id="overlaySaveBtn">💾 Save Selected</button>
+        <button class="btn-danger" id="overlaySaveCloseBtn">💾✕ Save & Close</button>
+      </div>
+      <div style="margin-top:6px;text-align:center;">
+        <button class="btn-save-tab-secondary" id="overlayDiscardBtn" style="width:100%;">🗑 Discard Others (save nothing, just free RAM)</button>
+      </div>
     </div>
   </div>
 
